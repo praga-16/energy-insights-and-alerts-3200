@@ -59,14 +59,38 @@ def _get_db_config() -> DbConfig:
     Load DB config.
 
     Environment variables:
-    - SQLITE_DB: path to sqlite database file
-      (provided by the platform; do not hardcode)
+    - SQLITE_DB: absolute path to the sqlite database file (provided by the platform).
+
+    Preview/dev behavior:
+    - Prefer SQLITE_DB when present.
+    - If not present, attempt to locate the seeded DB produced by the database container
+      inside this mono-repo checkout.
+    - Otherwise fall back to a local backend file to keep standalone dev working.
     """
     db_path = (os.getenv("SQLITE_DB") or "").strip()
     if not db_path:
-        # Fallback: use local file within backend container if env var isn't set.
-        # This keeps dev working while still preferring env var in deployment.
+        # Try to locate the repo-local DB created by the database container.
+        # This is primarily for local dev/preview setups where the env var
+        # might not be injected for some reason.
+        repo_db = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+                "energy-insights-and-alerts-3199",
+                "database",
+                "myapp.db",
+            )
+        )
+        if os.path.exists(repo_db):
+            db_path = repo_db
+
+    if not db_path:
+        # Final fallback: use a local file within the backend container.
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "energy.db"))
+
     return DbConfig(db_path=db_path)
 
 
@@ -397,7 +421,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Deployment can tighten this.
-    allow_credentials=True,
+    # NOTE: Browsers disallow wildcard origins with credentials.
+    # This app does not rely on cookies/HTTP auth, so keep this False for compatibility.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
